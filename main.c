@@ -263,6 +263,13 @@ int handle_client(player *client)
     return 1;
 }
 
+void clean_up_clients(player *clients, int max_players)
+{
+    int i;
+    for (i = 0; i < max_players; ++i)
+        free(clients);
+}
+
 void find_command(player *clients, int max_players, int now_players, int sender)
 {
     int n_pos = get_buff_enter(clients[sender].buffer);
@@ -291,11 +298,14 @@ int main(int argc, char *argv[])
     int max_d;
     int fd;
     int i;
+    int res;
     int now_players = 0;
+    int start = 0;
+    int reach_max = 0;
     unsigned int addrlen;
     struct sockaddr_in client_addr;
     fd_set readfds;
-    player *clients = NULL;
+    player *clients;
     if (!check_argc(argc))
         return 1;
     max_players = str_to_int(argv[1]);
@@ -305,18 +315,15 @@ int main(int argc, char *argv[])
     sock = deploy_server_socket(port, max_players);
     printf("Starting server...\n");
     clients = init_clients(max_players);
-    while (1)
+    while (now_players > 0 || start == 0)
     {
         max_d = sock;
         FD_ZERO(&readfds);
         FD_SET(sock, &readfds);
         set_fd_readfds(clients, max_players, &readfds, &max_d);
-        int res = select(max_d + 1, &readfds, NULL, NULL, NULL);
+        res = select(max_d + 1, &readfds, NULL, NULL, NULL);
         if (res < 1)
-        {
-            perror("Select problem ");
-            return 1;
-        }
+            return_with_error("Select problem ");
         if (FD_ISSET(sock, &readfds))
         {
             addrlen = sizeof(client_addr);
@@ -326,15 +333,20 @@ int main(int argc, char *argv[])
                 write(fd, too_many, sizeof(too_many));
                 close_connection(fd);
             }
-            else
+            else if (!reach_max)
             {
+                if (!start)
+                    start = 1;
                 now_players++;
                 printf("New connect from ip %s %d\n",
                        inet_ntoa(client_addr.sin_addr), client_addr.sin_port);
                 send_all_clients(clients, max_players, new_client, sizeof(new_client));
                 add_new_client(clients, fd, max_players);
                 if (now_players == max_players)
+                {
                     send_all_clients(clients, max_players, start_game, sizeof(start_game));
+                    reach_max = 1;
+                }
             }
         }
         for (i = 0; i < max_players; i++)
@@ -348,5 +360,7 @@ int main(int argc, char *argv[])
             }
         }
     }
+    clean_up_clients(clients, max_players);
+    printf("No more clients. Exiting...");
     return 0;
 }
