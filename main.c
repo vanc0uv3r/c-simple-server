@@ -22,6 +22,7 @@ const char help_buf[] = "inc – increments counter\ndec – decrements counter\
 const char too_many[] = "Cannot connect to server! Too many players already\n";
 const char no_enough[] = "Sorry, but we are waiting for all players\n";
 const char new_client[] = "New client has connected\n";
+const char game_on[] = "Sorry, you cannot enter. Game is on\n";
 const char start_game[] = "Alright. Everyone is here. Now we can start the game."
                           " Let's Go!\n";
 
@@ -263,27 +264,18 @@ int handle_client(player *client)
     return 1;
 }
 
-void clean_up_clients(player *clients, int max_players)
-{
-    int i;
-    for (i = 0; i < max_players; ++i)
-        free(clients);
-}
-
-void find_command(player *clients, int max_players, int now_players, int sender)
+void find_command(player *clients, int max_players, int sender, int start)
 {
     int n_pos = get_buff_enter(clients[sender].buffer);
     char *cmd;
     while (n_pos != -1)
     {
         cmd = cut_command(&clients[sender], n_pos);
-        if (max_players != now_players)
+        if (!start)
             write(clients[sender].fd, no_enough, sizeof(no_enough));
         else
-        {
             execute_command(cmd, clients, max_players, sender);
-            free(cmd);
-        }
+        free(cmd);
         n_pos = get_buff_enter(clients[sender].buffer);
     }
     if (strlen(clients[sender].buffer) == 0)
@@ -335,8 +327,6 @@ int main(int argc, char *argv[])
             }
             else if (!reach_max)
             {
-                if (!start)
-                    start = 1;
                 now_players++;
                 printf("New connect from ip %s %d\n",
                        inet_ntoa(client_addr.sin_addr), client_addr.sin_port);
@@ -346,7 +336,12 @@ int main(int argc, char *argv[])
                 {
                     send_all_clients(clients, max_players, start_game, sizeof(start_game));
                     reach_max = 1;
+                    start = 1;
                 }
+            } else if (start)
+            {
+                write(fd, game_on, sizeof(game_on));
+                close_connection(fd);
             }
         }
         for (i = 0; i < max_players; i++)
@@ -356,11 +351,11 @@ int main(int argc, char *argv[])
                 if (handle_client(&clients[i]) == 0)
                     now_players--;
                 else
-                    find_command(clients, max_players, now_players, i);
+                    find_command(clients, max_players, i, start);
             }
         }
     }
-    clean_up_clients(clients, max_players);
-    printf("No more clients. Exiting...");
+    free(clients);
+    printf("No more clients. Exiting...\n");
     return 0;
 }
