@@ -9,9 +9,6 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 
-#define CLIENT_BUFFER_SIZE 8
-#define READ_BUFFER_SIZE 8
-
 int counter = 0;
 
 const char invalid_buf[] = "Invalid command! Try help to see command list\n";
@@ -19,12 +16,22 @@ const char inc_buf[] = "The counter has incremented. Now it's = ";
 const char dec_buf[] = "The counter has decremented. Now it's = ";
 const char help_buf[] = "inc – increments counter\ndec – decrements counter\n"
                   "help – show command list\n";
-const char too_many[] = "Cannot connect to server! Too many players already\n";
-const char no_enough[] = "Sorry, but we are waiting for all players\n";
-const char new_client[] = "New client has connected\n";
-const char game_on[] = "Sorry, you cannot enter. Game is on\n";
-const char start_game[] = "Alright. Everyone is here. Now we can start the game."
-                          " Let's Go!\n";
+const char too_many_msg[] = "Cannot connect to server! Too many players already"
+                            "\n";
+const char no_enough_msg[] = "Sorry, but we are waiting for all players\n";
+const char new_client_msg[] = "New client has connected\n";
+const char game_on_msg[] = "Sorry, you cannot enter. Game is on\n";
+const char invalid_port_msg[] = "Invalid port!\n";
+const char invalid_argc_msg[] = "Invalid number of arguments!\n"
+                            "Usage: max_players port\n";
+const char start_game_msg[] = "Alright. Everyone is here. Now we can start the "
+                              "game! Let's Go!\n";
+
+enum sizes{
+    client_buffer_size = 8,
+    read_buffer_size = 8,
+    int_bites = 13
+};
 
 typedef struct player
 {
@@ -33,6 +40,14 @@ typedef struct player
     int empty;
     char *buffer;
 } player;
+
+typedef struct server
+{
+    int max_players;
+    int now_players;
+    int start;
+    int reached_max;
+} server;
 
 int str_to_int(char *s)
 {
@@ -68,9 +83,15 @@ void set_fd_readfds(player *clients, int players, fd_set *readfds, int *max_d)
     }
 }
 
-int return_with_error(char *buffer)
+void exit_with_perror(char *buffer)
 {
     perror(buffer);
+    exit(1);
+}
+
+void exit_with_print(const char *buffer)
+{
+    printf("%s\n", buffer);
     exit(1);
 }
 
@@ -100,14 +121,14 @@ int deploy_server_socket(int port, int max_players)
     int sock;
     struct sockaddr_in server_addr;
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1)
-        return_with_error("Socket problem");
+        exit_with_perror("Socket problem");
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
     server_addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
-        return_with_error("Binding problem");
+        exit_with_perror("Binding problem");
     if (listen(sock, max_players) == -1)
-        return_with_error("Listen socket problem");
+        exit_with_perror("Listen socket problem");
     return sock;
 }
 
@@ -118,9 +139,9 @@ player *init_clients(int players)
     for (i = 0; i < players; ++i)
     {
         tmp[i].fd = -1;
-        tmp[i].buffer = calloc(CLIENT_BUFFER_SIZE, sizeof(char));
-        tmp[i].empty = CLIENT_BUFFER_SIZE;
-        tmp[i].buffer_size = CLIENT_BUFFER_SIZE;
+        tmp[i].buffer = calloc(client_buffer_size, sizeof(char));
+        tmp[i].empty = client_buffer_size;
+        tmp[i].buffer_size = client_buffer_size;
     }
     return tmp;
 }
@@ -133,6 +154,8 @@ void add_new_client(player *clients, int fd, int max_players)
         if (clients[i].fd == -1)
         {
             clients[i].fd = fd;
+            if (clients[i].buffer == NULL)
+                clients[i].buffer = calloc(client_buffer_size, sizeof(char));
             break;
         }
     }
@@ -162,9 +185,11 @@ void add_client_data(player *client, char *buff, int buff_size)
 void delete_client(player *client)
 {
     client->fd = -1;
-    client->empty = CLIENT_BUFFER_SIZE;
-    client->buffer_size = CLIENT_BUFFER_SIZE;
-    free(client->buffer);
+    client->empty = client_buffer_size;
+    client->buffer_size = client_buffer_size;
+    if (client->buffer != NULL)
+        free(client->buffer);
+    client->buffer = NULL;
 }
 
 int get_buff_enter(char *buff)
@@ -196,29 +221,29 @@ char *cut_command(player *client, int to)
 
 void reset_client_buffer(player *client)
 {
-    if (client->buffer_size != CLIENT_BUFFER_SIZE)
+    if (client->buffer_size != client_buffer_size)
     {
         free(client->buffer);
-        client->buffer_size = CLIENT_BUFFER_SIZE;
-        client->buffer = calloc(CLIENT_BUFFER_SIZE, sizeof(char));
+        client->buffer_size = client_buffer_size;
+        client->buffer = calloc(client_buffer_size, sizeof(char));
     }
-    client->empty = CLIENT_BUFFER_SIZE;
+    client->empty = client_buffer_size;
 }
 
-void send_all_clients(player *clients, int max_players, const char *buff, int b_size)
+void send_all_clients(player *clients, int max_p, const char *buff, int b_size)
 {
     int i;
-    for (i = 0; i < max_players; ++i) {
+    for (i = 0; i < max_p; ++i) {
         if (clients[i].fd != -1)
             write(clients[i].fd, buff, b_size);
     }
 }
 
-void execute_command(char *command, player *clients, int max_players, int sender)
+void execute_command(char *cmd, player *clients, int max_players, int sender)
 {
     char *templ_buf;
     int templ_size;
-    if (strcmp(command, "inc") == 0)
+    if (strcmp(cmd, "inc") == 0)
     {
         counter++;
         templ_buf = malloc(sizeof(char) * (14 + sizeof(inc_buf)));
@@ -227,25 +252,25 @@ void execute_command(char *command, player *clients, int max_players, int sender
         send_all_clients(clients, max_players, templ_buf, templ_size);
         free(templ_buf);
     }
-    else if (strcmp(command, "dec") == 0)
+    else if (strcmp(cmd, "dec") == 0)
     {
         counter--;
-        templ_buf = malloc(sizeof(char) * (14 + sizeof(dec_buf)));
-        templ_size = snprintf(templ_buf, 14 + sizeof(dec_buf), "%s%d\n",
+        templ_buf = malloc(sizeof(char) * (int_bites + sizeof(dec_buf)));
+        templ_size = snprintf(templ_buf, int_bites + sizeof(dec_buf), "%s%d\n",
                               dec_buf, counter);
         send_all_clients(clients, max_players, templ_buf, templ_size);
         free(templ_buf);
     }
-    else if (strcmp(command, "help") == 0)
+    else if (strcmp(cmd, "help") == 0)
         write(clients[sender].fd, help_buf, sizeof(help_buf));
     else
         write(clients[sender].fd, invalid_buf, sizeof(invalid_buf));
 }
 
-int handle_client(player *client)
+int read_client_data(player *client)
 {
     int rc;
-    char buff[READ_BUFFER_SIZE];
+    char buff[read_buffer_size];
     rc = read(client->fd, buff, sizeof(buff) - 1);
     if (rc == -1)
     {
@@ -264,6 +289,11 @@ int handle_client(player *client)
     return 1;
 }
 
+int can_play(int now_players, int start)
+{
+    return now_players > 0 || start == 0;
+}
+
 void find_command(player *clients, int max_players, int sender, int start)
 {
     int n_pos = get_buff_enter(clients[sender].buffer);
@@ -272,7 +302,7 @@ void find_command(player *clients, int max_players, int sender, int start)
     {
         cmd = cut_command(&clients[sender], n_pos);
         if (!start)
-            write(clients[sender].fd, no_enough, sizeof(no_enough));
+            write(clients[sender].fd, no_enough_msg, sizeof(no_enough_msg));
         else
             execute_command(cmd, clients, max_players, sender);
         free(cmd);
@@ -282,80 +312,97 @@ void find_command(player *clients, int max_players, int sender, int start)
         reset_client_buffer(&clients[sender]);
 }
 
+void handle_client(player *clients, server *serv, fd_set *readfds)
+{
+    int i;
+    for (i = 0; i < serv->max_players; i++)
+    {
+        if (clients[i].fd != -1 && FD_ISSET(clients[i].fd, readfds))
+        {
+            if (read_client_data(&clients[i]) == 0)
+                serv->now_players--;
+            else
+                find_command(clients, serv->max_players, i, serv->start);
+        }
+    }
+}
+
+void start_game(player *clients, server *serv)
+{
+    send_all_clients(clients, serv->max_players, start_game_msg,
+                     sizeof(start_game_msg));
+    serv->reached_max = 1;
+    serv->start = 1;
+}
+
+
+server *init_server(int max_players)
+{
+    server *tmp = malloc(sizeof(*tmp));
+    tmp->start = 0;
+    tmp->max_players = max_players;
+    tmp->now_players = 0;
+    tmp->reached_max = 0;
+    return tmp;
+}
+
 int main(int argc, char *argv[])
 {
-    int sock;
-    int port;
-    int max_players;
-    int max_d;
-    int fd;
-    int i;
-    int res;
-    int now_players = 0;
-    int start = 0;
-    int reach_max = 0;
+    int sock, port, max_players, max_d, fd, res;
     unsigned int addrlen;
     struct sockaddr_in client_addr;
     fd_set readfds;
     player *clients;
+    server *serv;
     if (!check_argc(argc))
-        return 1;
+        exit_with_print(invalid_argc_msg);
     max_players = str_to_int(argv[1]);
     port = str_to_int(argv[2]);
     if (!check_argv(port, max_players))
-        return 1;
+        exit_with_print(invalid_port_msg);
     sock = deploy_server_socket(port, max_players);
+    serv = init_server(max_players);
     printf("Starting server...\n");
     clients = init_clients(max_players);
-    while (now_players > 0 || start == 0)
+    while (can_play(serv->now_players, serv->start))
     {
         max_d = sock;
         FD_ZERO(&readfds);
         FD_SET(sock, &readfds);
-        set_fd_readfds(clients, max_players, &readfds, &max_d);
+        set_fd_readfds(clients, serv->max_players, &readfds, &max_d);
         res = select(max_d + 1, &readfds, NULL, NULL, NULL);
         if (res < 1)
-            return_with_error("Select problem ");
+            exit_with_perror("Select problem ");
         if (FD_ISSET(sock, &readfds))
         {
             addrlen = sizeof(client_addr);
             fd = accept(sock, (struct sockaddr *)&client_addr, &addrlen);
-            if (now_players == max_players)
+            if (serv->now_players == serv->max_players)
             {
-                write(fd, too_many, sizeof(too_many));
+                write(fd, too_many_msg, sizeof(too_many_msg));
                 close_connection(fd);
             }
-            else if (!reach_max)
+            else if (!serv->reached_max)
             {
-                now_players++;
+                serv->now_players++;
                 printf("New connect from ip %s %d\n",
                        inet_ntoa(client_addr.sin_addr), client_addr.sin_port);
-                send_all_clients(clients, max_players, new_client, sizeof(new_client));
-                add_new_client(clients, fd, max_players);
-                if (now_players == max_players)
-                {
-                    send_all_clients(clients, max_players, start_game, sizeof(start_game));
-                    reach_max = 1;
-                    start = 1;
-                }
-            } else if (start)
+                send_all_clients(clients, serv->max_players, new_client_msg,
+                                 sizeof(new_client_msg));
+                add_new_client(clients, fd, serv->max_players);
+                if (serv->now_players == serv->max_players)
+                    start_game(clients, serv);
+            } else if (serv->start)
             {
-                write(fd, game_on, sizeof(game_on));
+                write(fd, game_on_msg, sizeof(game_on_msg));
                 close_connection(fd);
             }
         }
-        for (i = 0; i < max_players; i++)
-        {
-            if (clients[i].fd != -1 && FD_ISSET(clients[i].fd, &readfds))
-            {
-                if (handle_client(&clients[i]) == 0)
-                    now_players--;
-                else
-                    find_command(clients, max_players, i, start);
-            }
-        }
+        handle_client(clients, serv, &readfds);
     }
     free(clients);
+    free(serv);
+    close(sock);
     printf("No more clients. Exiting...\n");
     return 0;
 }
