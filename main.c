@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <netinet/in.h>
 #include <string.h>
 #include <unistd.h>
@@ -342,35 +341,12 @@ void start_game(player *clients, server *serv)
     serv->start = 1;
 }
 
-
-server *init_server(int max_players)
+void start_server(int sock, server *serv, player *clients)
 {
-    server *tmp = malloc(sizeof(*tmp));
-    tmp->start = 0;
-    tmp->max_players = max_players;
-    tmp->now_players = 0;
-    tmp->reached_max = 0;
-    return tmp;
-}
-
-int main(int argc, char *argv[])
-{
-    int sock, port, max_players, max_d, fd, res;
+    int res, max_d, fd;
     unsigned int addrlen;
     struct sockaddr_in client_addr;
     fd_set readfds;
-    player *clients;
-    server *serv;
-    if (!check_argc(argc))
-        exit_with_print(invalid_argc_msg);
-    max_players = str_to_int(argv[1]);
-    port = str_to_int(argv[2]);
-    if (check_argv(port, max_players))
-        exit_with_print(invalid_port_msg);
-    sock = deploy_server_socket(port, max_players);
-    serv = init_server(max_players);
-    printf("Starting server...\n");
-    clients = init_clients(max_players);
     while (can_play(serv->now_players, serv->start))
     {
         max_d = sock;
@@ -399,7 +375,8 @@ int main(int argc, char *argv[])
                 add_new_client(clients, fd, serv->max_players);
                 if (serv->now_players == serv->max_players)
                     start_game(clients, serv);
-            } else if (serv->start)
+            }
+            else if (serv->start)
             {
                 write(fd, game_on_msg, sizeof(game_on_msg));
                 close_connection(fd);
@@ -407,6 +384,34 @@ int main(int argc, char *argv[])
         }
         handle_client(clients, serv, &readfds);
     }
+}
+
+server *init_server(int max_players)
+{
+    server *tmp = malloc(sizeof(*tmp));
+    tmp->start = 0;
+    tmp->max_players = max_players;
+    tmp->now_players = 0;
+    tmp->reached_max = 0;
+    return tmp;
+}
+
+int main(int argc, char *argv[])
+{
+    int sock, port, max_players;
+    player *clients;
+    server *serv;
+    if (!check_argc(argc))
+        exit_with_print(invalid_argc_msg);
+    max_players = str_to_int(argv[1]);
+    port = str_to_int(argv[2]);
+    if (check_argv(port, max_players))
+        exit_with_print(invalid_port_msg);
+    sock = deploy_server_socket(port, max_players);
+    serv = init_server(max_players);
+    printf("Starting server...\n");
+    clients = init_clients(max_players);
+    start_server(sock, serv, clients);
     free(clients);
     free(serv);
     close(sock);
