@@ -21,15 +21,17 @@ const char too_many_msg[] = "Cannot connect to server! Too many players already"
 const char no_enough_msg[] = "Sorry, but we are waiting for all players\n";
 const char new_client_msg[] = "New client has connected\n";
 const char game_on_msg[] = "Sorry, you cannot enter. Game is on\n";
-const char invalid_port_msg[] = "Invalid port!\n";
+const char invalid_port_msg[] = "Invalid port or user number! Max user number "
+                                "is 1000 and port can be more then 1024 and les"
+                                "s then 65000\n";
 const char invalid_argc_msg[] = "Invalid number of arguments!\n"
                             "Usage: max_players port\n";
 const char start_game_msg[] = "Alright. Everyone is here. Now we can start the "
                               "game! Let's Go!\n";
 
 enum sizes{
-    client_buffer_size = 8,
-    read_buffer_size = 8,
+    client_buffer_size = 1024,
+    read_buffer_size = 1024,
     int_bites = 13
 };
 
@@ -52,13 +54,18 @@ typedef struct server
 int str_to_int(char *s)
 {
     int i, num = 0, minus = 1;
+    if (strlen(s) > 12)
+        return -1;
     for (i = 0; i < strlen(s); ++i)
     {
         if (i == 0 && s[i] == '-')
             minus = -1;
-        else if ((s[i] > '9' || s[i] < '0'))
-            return -1;
-        num = num * 10 + s[i] - '0';
+        else
+        {
+            if ((s[i] > '9' || s[i] < '0'))
+                return -1;
+            num = num * 10 + s[i] - '0';
+        }
     }
     return num * minus;
 }
@@ -97,12 +104,8 @@ void exit_with_print(const char *buffer)
 
 int check_argv(int port, int max_players)
 {
-    if (max_players == -1 || port == -1)
-    {
-        printf("Players number or port is not integer!\n");
-        return 0;
-    }
-    return 1;
+    return (max_players == -1 || port == -1) || (max_players > 1000
+    || port > 65000 || max_players < 1 || port < 1024);
 }
 
 int check_argc(int argc)
@@ -118,10 +121,11 @@ int check_argc(int argc)
 
 int deploy_server_socket(int port, int max_players)
 {
-    int sock;
+    int sock, opt = 1;
     struct sockaddr_in server_addr;
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1)
         exit_with_perror("Socket problem");
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
     server_addr.sin_addr.s_addr = INADDR_ANY;
@@ -179,7 +183,7 @@ void add_client_data(player *client, char *buff, int buff_size)
     }
     strncpy(client->buffer + strlen(client->buffer), buff, buff_size);
     client->empty -= buff_size;
-    printf("empty = %d\n", client->empty);
+//    printf("empty = %d\n", client->empty);
 }
 
 void delete_client(player *client)
@@ -206,8 +210,8 @@ int get_buff_enter(char *buff)
 char *cut_command(player *client, int to)
 {
     int i;
-    char *tmp = malloc(to * sizeof(*tmp));
-    strncpy(tmp, client->buffer, to);
+    char *tmp = malloc((to + 1) * sizeof(*tmp));
+    strncpy(tmp, client->buffer, to + 1);
     tmp[to - 1] = '\0';
     for (i = 0; i < strlen(client->buffer); ++i)
     {
@@ -309,7 +313,10 @@ void find_command(player *clients, int max_players, int sender, int start)
         n_pos = get_buff_enter(clients[sender].buffer);
     }
     if (strlen(clients[sender].buffer) == 0)
+    {
+        printf("kek\n");
         reset_client_buffer(&clients[sender]);
+    }
 }
 
 void handle_client(player *clients, server *serv, fd_set *readfds)
@@ -358,7 +365,7 @@ int main(int argc, char *argv[])
         exit_with_print(invalid_argc_msg);
     max_players = str_to_int(argv[1]);
     port = str_to_int(argv[2]);
-    if (!check_argv(port, max_players))
+    if (check_argv(port, max_players))
         exit_with_print(invalid_port_msg);
     sock = deploy_server_socket(port, max_players);
     serv = init_server(max_players);
