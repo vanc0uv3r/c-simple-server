@@ -112,7 +112,7 @@ int check_argc(int argc)
     if (argc != 3)
     {
         printf("Invalid number of arguments!\n"
-               "Usage: ./prog players_number port_to_bind\n");
+               "Usage: ./prog <players_number> <port_to_bind>\n");
         return 0;
     }
     return 1;
@@ -266,7 +266,7 @@ void execute_command(char *cmd, player *clients, int max_players, int sender)
     }
     else if (strcmp(cmd, "help") == 0)
         write(clients[sender].fd, help_buf, sizeof(help_buf));
-    else
+    else if (strcmp(cmd, "\n") != 0)
         write(clients[sender].fd, invalid_buf, sizeof(invalid_buf));
 }
 
@@ -297,6 +297,20 @@ int can_play(int now_players, int start)
     return now_players > 0 || start == 0;
 }
 
+char *trim(char *str)
+{
+    char *end;
+    while(*str == ' ') str++
+    ;
+    if (*str == 0)
+        return str;
+    end = str + strlen(str) - 1;
+    while(end > str && *end == ' ') end--
+    ;
+    end[1] = '\0';
+    return str;
+}
+
 void find_command(player *clients, int max_players, int sender, int start)
 {
     int n_pos = get_buff_enter(clients[sender].buffer);
@@ -307,15 +321,12 @@ void find_command(player *clients, int max_players, int sender, int start)
         if (!start)
             write(clients[sender].fd, no_enough_msg, sizeof(no_enough_msg));
         else
-            execute_command(cmd, clients, max_players, sender);
+            execute_command(trim(cmd), clients, max_players, sender);
         free(cmd);
         n_pos = get_buff_enter(clients[sender].buffer);
     }
     if (strlen(clients[sender].buffer) == 0)
-    {
-        printf("kek\n");
         reset_client_buffer(&clients[sender]);
-    }
 }
 
 void handle_client(player *clients, server *serv, fd_set *readfds)
