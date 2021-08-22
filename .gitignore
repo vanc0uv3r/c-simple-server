@@ -64,3 +64,4 @@ gen
 main
 /CMakeLists.txt
 /cmake-build-debug/
+/server
