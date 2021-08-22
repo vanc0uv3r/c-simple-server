@@ -266,7 +266,7 @@ void execute_command(char *cmd, player *clients, int max_players, int sender)
     }
     else if (strcmp(cmd, "help") == 0)
         write(clients[sender].fd, help_buf, sizeof(help_buf));
-    else if (strcmp(cmd, "\n") != 0)
+    else if (*cmd != 0)
         write(clients[sender].fd, invalid_buf, sizeof(invalid_buf));
 }
 
